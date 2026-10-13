@@ -1,5 +1,5 @@
 /** POST /api/ecoscan/jobs/[id]/ack {ok, detail?} — ESP32 acknowledgement (token-gated). */
-import { ApiError, audit, bodyOf, needDb, needToken, prisma, raiseAlert, route, str } from "../../_db";
+import { ApiError, audit, bodyOf, needDb, needToken, prisma, raiseAlert, route, str } from "../../_db.js";
 
 export default route(async (req) => {
   if (req.method !== "POST") throw new ApiError("METHOD", "Use POST.", 405);
