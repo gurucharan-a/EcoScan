@@ -1,6 +1,6 @@
 /** POST /api/ecoscan/scans/[id]/classify {category, confidence, provider?, simulated?} */
-import { ApiError, audit, bodyOf, needDb, prisma, raiseAlert, route, str } from "../../_db";
-import { assertTransition, CONF_THRESHOLD } from "../../_rules";
+import { ApiError, audit, bodyOf, needDb, prisma, raiseAlert, route, str } from "../../_db.js";
+import { assertTransition, CONF_THRESHOLD } from "../../_rules.js";
 
 export default route(async (req) => {
   if (req.method !== "POST") throw new ApiError("METHOD", "Use POST.", 405);
