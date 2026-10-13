@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertTransition, decodeRec, encodeRec, FLOW, ruleKind, SERVO_ANGLE } from "./_rules";
+import { assertTransition, decodeRec, encodeRec, FLOW, ruleKind, SERVO_ANGLE } from "./_rules.js";
 
 describe("server rule engine parity (api/ecoscan/_rules.ts)", () => {
   it("matches the frontend engine on key cases", () => {
