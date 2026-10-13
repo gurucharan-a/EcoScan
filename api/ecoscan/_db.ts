@@ -1,3 +1,4 @@
+import process from "node:process";
 /**
  * Shared foundation for /api/ecoscan/* (Vercel Node runtime + Prisma Postgres).
  * - Prisma singleton (serverless-safe)
