@@ -1,6 +1,6 @@
 /** POST /api/ecoscan/scans/[id]/recommend — transparent rule output, versioned. */
-import { ApiError, audit, needDb, prisma, raiseAlert, route, str } from "../../_db";
-import { encodeRec, ruleKind } from "../../_rules";
+import { ApiError, audit, needDb, prisma, raiseAlert, route, str } from "../../_db.js";
+import { encodeRec, ruleKind } from "../../_rules.js";
 
 export default route(async (req) => {
   if (req.method !== "POST") throw new ApiError("METHOD", "Use POST.", 405);
