@@ -1,5 +1,5 @@
 /** GET /api/ecoscan/dashboard — genuine Postgres aggregates, never hardcoded. */
-import { audit, needDb, prisma, route } from "./_db";
+import { audit, needDb, prisma, route } from "./_db.js";
 
 export default route(async () => {
   needDb();
