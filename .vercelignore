@@ -6,4 +6,5 @@ docs/
 scripts/
 *.log
 dev-server*.log
+*.zip
 .git/

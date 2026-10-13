@@ -43,6 +43,7 @@ function defaults(): EcoDB {
       co2Source: "Illustrative planning factor (see Sustainability page).",
       materialValuePerKg: 140,
       mode: "demo", apiUrl: "", deviceTokenPresent: false,
+      dbMode: "local", pgBase: "",
     },
     seq: 0,
   };

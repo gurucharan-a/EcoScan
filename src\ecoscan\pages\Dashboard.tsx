@@ -1,11 +1,95 @@
+import { useEffect, useState } from "react";
 import { useEco, dashboard, seedDemo } from "@/ecoscan/services/ecoStore";
+import { pgSummary, type PgSummary } from "@/ecoscan/services/ecoRemote";
+import { usePg, PgBanner, PgError } from "@/ecoscan/components/PgMode";
 import { summarize } from "@/ecoscan/lib/sustainability";
 import { Card, CardTitle, Badge, Bars, Donut, Empty, recColor, Btn } from "@/ecoscan/components/ui";
 import { categoryLabel } from "@/ecoscan/types";
 import { fmtG } from "@/ecoscan/lib/ecoUtils";
 
+function Kpis({ items }: { items: { label: string; value: string; sub: string }[] }) {
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {items.map((k) => (
+        <Card key={k.label} className="!p-3.5">
+          <p className="text-[11.5px] font-semibold text-stone-500">{k.label}</p>
+          <p className="font-display text-[22px] font-extrabold leading-tight">{k.value}</p>
+          <p className="text-[11px] text-stone-400">{k.sub}</p>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function PgDashboard({ base, go, openScan }: { base: string; go: (p: any) => void; openScan: (id: string) => void }) {
+  const [sum, setSum] = useState<PgSummary | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const load = () => {
+    setLoading(true); setErr(null);
+    pgSummary(base).then((s) => { setSum(s); setLoading(false); })
+      .catch((e) => { setErr((e as Error).message); setLoading(false); });
+  };
+  useEffect(load, [base]);
+
+  if (loading) return <div className="space-y-4"><PgBanner what="Loading live aggregates from Postgres." /><Card><p className="text-[13px] text-stone-500">Loading Postgres aggregates…</p></Card></div>;
+  if (err || !sum) return <div className="space-y-4"><PgBanner what="Postgres aggregates." /><PgError message={err ?? "No data."} retry={load} /></div>;
+  if (sum.totalScans === 0) {
+    return (
+      <div className="space-y-4">
+        <PgBanner what="Connected — the Postgres database is empty." />
+        <Empty title="No scans in Postgres yet" body="Run your first scan in Postgres mode, or push existing browser records later. Tables are created with prisma db push (see docs/DATABASE.md)."
+          action={<Btn onClick={() => go("scanner")}>Open Live Scanner</Btn>} />
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-4">
+      <PgBanner what="All metrics below are live Postgres aggregates." />
+      <Kpis items={[
+        { label: "Items scanned", value: String(sum.totalScans), sub: "postgres rows" },
+        { label: "Measured weight", value: fmtG(sum.totalWeightG), sub: "weighed mass" },
+        { label: "Awaiting review", value: String(sum.awaitingReview), sub: "confirm in Scanner" },
+        { label: "Reuse / Repair", value: String(sum.reuseRepair), sub: "recommended" },
+        { label: "Recycling", value: String(sum.recycle), sub: "routed" },
+        { label: "Hazardous", value: String(sum.hazardous), sub: "special handling" },
+        { label: "Sort success", value: sum.sortSuccessRate == null ? "—" : `${sum.sortSuccessRate}%`, sub: "acked completions" },
+        { label: "Database", value: "Postgres", sub: "via Prisma API" },
+      ]} />
+      <div className="grid gap-3 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          <CardTitle sub="Stored scan categories (Postgres)">Waste category mix</CardTitle>
+          <Donut slices={sum.byCategory.map((c, i) => ({ label: categoryLabel(c.name as any), value: c.count, color: ["#166534", "#0f766e", "#a16207", "#b91c1c", "#57534e", "#0284c7"][i % 6] }))} />
+        </Card>
+        <Card>
+          <CardTitle sub="Newest first">Latest scan activity</CardTitle>
+          <div className="divide-y divide-stone-100">
+            {(sum.recent as any[]).map((r: any) => (
+              <button key={r.id} onClick={() => openScan(r.id)} className="flex w-full items-center gap-3 py-2 text-left hover:bg-stone-50">
+                <span className="font-mono text-[12px] font-bold text-emerald-900">{r.code}</span>
+                <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{r.name}</span>
+                <span className="text-[12px] text-stone-400">{fmtG(r.weightG)}</span>
+              </button>
+            ))}
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard({ go, openScan }: { go: (p: any) => void; openScan: (id: string) => void }) {
   const db = useEco();
+  const { pg, base } = usePg();
+  if (pg) return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-[11px] font-bold tracking-[0.14em] text-emerald-800">COMMAND CENTER · POSTGRES</p>
+        <h1 className="font-display text-2xl font-extrabold">Overview Dashboard</h1>
+      </div>
+      <PgDashboard base={base} go={go} openScan={openScan} />
+    </div>
+  );
   const s = dashboard();
 
   if (s.totalScans === 0) {
@@ -45,15 +129,7 @@ export default function Dashboard({ go, openScan }: { go: (p: any) => void; open
         <p className="text-[13px] text-stone-500">Live aggregates from {s.totalScans} stored scans · {db.settings.mode === "demo" ? "demo data labeled" : "hardware measurements"}.</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {kpis.map((k) => (
-          <Card key={k.label} className="!p-3.5">
-            <p className="text-[11.5px] font-semibold text-stone-500">{k.label}</p>
-            <p className="font-display text-[22px] font-extrabold leading-tight">{k.value}</p>
-            <p className="text-[11px] text-stone-400">{k.sub}</p>
-          </Card>
-        ))}
-      </div>
+      <Kpis items={kpis} />
 
       <div className="grid gap-3 lg:grid-cols-3">
         <Card className="lg:col-span-2">

@@ -225,6 +225,10 @@ export interface EcoSettings {
   mode: "demo" | "hardware";
   apiUrl: string;
   deviceTokenPresent: boolean;
+  /** Database backend: browser localStorage ("local") or Prisma Postgres API ("postgres"). */
+  dbMode: "local" | "postgres";
+  /** Base URL of the Postgres API ("" = same origin /api/ecoscan). */
+  pgBase: string;
 }
 
 export interface EcoDB {

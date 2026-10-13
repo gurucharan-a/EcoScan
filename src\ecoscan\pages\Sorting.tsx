@@ -1,15 +1,87 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useEco, submitSortJob, retryJob, ackJob } from "@/ecoscan/services/ecoStore";
-import { DEST_LABEL } from "@/ecoscan/types";
+import { pgListScans, pgSort, pgGetJob } from "@/ecoscan/services/ecoRemote";
+import { usePg, PgBanner, PgError } from "@/ecoscan/components/PgMode";
+import { DEST_LABEL, type Scan, type SortingJob } from "@/ecoscan/types";
 import { Card, CardTitle, Btn, Badge, Empty } from "@/ecoscan/components/ui";
+
+function PgSorting({ base, openScan }: { base: string; openScan: (id: string) => void }) {
+  const [ready, setReady] = useState<Scan[]>([]);
+  const [jobs, setJobs] = useState<Record<string, SortingJob>>({});
+  const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const load = () => {
+    setLoading(true);
+    pgListScans(base, { status: "READY_TO_SORT", limit: 50 })
+      .then((r) => { setReady(r); setErr(null); setLoading(false); })
+      .catch((e) => { setErr((e as Error).message); setLoading(false); });
+  };
+  useEffect(load, [base]);
+
+  const run = async (scanId: string) => {
+    try {
+      const j = await pgSort(base, scanId);
+      setJobs((m) => ({ ...m, [scanId]: j }));
+      setErr(null);
+      for (let i = 0; i < 6; i++) {
+        await new Promise((r) => setTimeout(r, 2500));
+        try {
+          const cur = await pgGetJob(base, j.id);
+          setJobs((m) => ({ ...m, [scanId]: cur }));
+          if (cur.status === "COMPLETED" || cur.status === "FAILED") break;
+        } catch { break; }
+      }
+      load();
+    } catch (e) { setErr((e as Error).message); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <PgBanner what="Jobs are created in Postgres; success requires ESP32 acknowledgement." />
+      {err && <PgError message={err} retry={load} />}
+      <Card>
+        <CardTitle sub="Confirmed scans awaiting authorization (Postgres)">Ready to sort ({ready.length})</CardTitle>
+        {loading ? <p className="text-[13px] text-stone-500">Loading…</p>
+          : ready.length === 0 ? <Empty title="Nothing awaiting sorting" body="Confirm a scan first." />
+          : <div className="space-y-2">{ready.map((s) => {
+            const j = jobs[s.id];
+            return (
+              <div key={s.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-stone-200 px-3 py-2">
+                <span className="font-mono text-[12px] font-bold">{s.code}</span>
+                <span className="text-[13px] font-medium">{s.name}</span>
+                <Badge color="teal">{s.sortDestination ? DEST_LABEL[s.sortDestination] : "—"}</Badge>
+                <button className="text-[12.5px] text-emerald-800 underline" onClick={() => openScan(s.id)}>Report →</button>
+                <span className="ml-auto" />
+                {j && <span className="text-[12px] text-stone-500">{j.id.slice(-6)} · {j.status}{j.lastError ? ` · ${j.lastError}` : ""}</span>}
+                <Btn onClick={() => run(s.id)}>Authorize sort</Btn>
+              </div>
+            );
+          })}</div>}
+      </Card>
+    </div>
+  );
+}
 
 export default function Sorting({ openScan }: { openScan: (id: string) => void }) {
   const db = useEco();
+  const { pg, base } = usePg();
   const [err, setErr] = useState<string | null>(null);
   const [stop, setStop] = useState(false);
   const dev = db.devices[0];
   const simulated = db.settings.mode === "demo";
   const ready = db.scans.filter((s) => s.status === "READY_TO_SORT");
+
+  if (pg) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <p className="text-[11px] font-bold tracking-[0.14em] text-emerald-800">ACTUATION · POSTGRES + HARDWARE</p>
+          <h1 className="font-display text-2xl font-extrabold">Sorting Control</h1>
+        </div>
+        <PgSorting base={base} openScan={openScan} />
+      </div>
+    );
+  }
 
   const run = (scanId: string) => {
     if (stop) { setErr("Stop requested — clear the stop before authorizing movement."); return; }

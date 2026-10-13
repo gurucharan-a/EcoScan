@@ -1,9 +1,38 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useEco, setDeviceOnline, updateSettings } from "@/ecoscan/services/ecoStore";
+import { pgDevices } from "@/ecoscan/services/ecoRemote";
+import { usePg, PgBanner, PgError } from "@/ecoscan/components/PgMode";
 import { Card, CardTitle, Btn, Badge, Field, inputCls } from "@/ecoscan/components/ui";
+
+function PgDevices({ base }: { base: string }) {
+  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    pgDevices(base).then((d) => { setRows(d); setErr(null); }).catch((e) => setErr((e as Error).message));
+  }, [base]);
+  if (err) return <PgError message={err} retry={() => window.location.reload()} />;
+  return (
+    <Card>
+      <CardTitle sub="Live device rows from Postgres (heartbeats via ESP32 → API)">Registered chambers ({rows.length})</CardTitle>
+      {rows.length === 0 && <p className="text-[13px] text-stone-500">No devices yet — the first ESP32 heartbeat registers automatically.</p>}
+      <div className="space-y-2">
+        {rows.map((d) => (
+          <div key={String(d.id)} className="flex flex-wrap items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-[13px]">
+            <b>{String(d.name)}</b>
+            <span className="font-mono text-[11.5px] text-stone-400">{String(d.id)} · {String(d.board)} · fw {String(d.firmware)}</span>
+            <span className="ml-auto" />
+            {d.online ? <Badge color="green">ONLINE</Badge> : <Badge color="stone">OFFLINE</Badge>}
+            <span className="text-stone-500">last seen {d.lastSeen ? new Date(String(d.lastSeen)).toLocaleString() : "never"}</span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
 
 export default function Hardware() {
   const db = useEco();
+  const { pg, base } = usePg();
   const dev = db.devices[0];
   const [err, setErr] = useState<string | null>(null);
   const [tare, setTare] = useState("0");
@@ -22,10 +51,11 @@ export default function Hardware() {
   return (
     <div className="space-y-4">
       <div>
-        <p className="text-[11px] font-bold tracking-[0.14em] text-emerald-800">FLEET · 1 REGISTERED DEVICE</p>
+        <p className="text-[11px] font-bold tracking-[0.14em] text-emerald-800">FLEET{pg ? " · POSTGRES" : " · 1 REGISTERED DEVICE"}</p>
         <h1 className="font-display text-2xl font-extrabold">Device & Hardware Management</h1>
         <p className="text-[13px] text-stone-500">A sensor is shown connected only after a real heartbeat reports it — never because it is configured.</p>
       </div>
+      {pg && <><PgBanner what="Device registry reads Postgres heartbeat rows." /><PgDevices base={base} /></>}
       {err && <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-[13px] text-amber-900">{err}</div>}
       <div className="grid gap-3 lg:grid-cols-2">
         <Card>

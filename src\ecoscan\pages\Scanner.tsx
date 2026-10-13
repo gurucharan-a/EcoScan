@@ -1,12 +1,16 @@
 import { useRef, useState } from "react";
 import { useEco, createScan, applyClassification, runRecommendation, confirmScan, setDeviceOnline } from "@/ecoscan/services/ecoStore";
+import { pgCreateScan, pgClassify, pgRecommend, pgConfirm } from "@/ecoscan/services/ecoRemote";
+import { usePg, PgBanner, PgError } from "@/ecoscan/components/PgMode";
 import { classifyImage } from "@/ecoscan/lib/classifier";
 import { CATEGORIES, DEST_LABEL, categoryLabel, type DeviceCategory, type Scan } from "@/ecoscan/types";
 import { Card, CardTitle, Btn, Field, Badge, Progress, inputCls, selectCls, recColor } from "@/ecoscan/components/ui";
 
 // Scanner workflow: capture/upload -> classify -> weigh -> assess -> recommend -> confirm.
+// Browser-DB mode persists to localStorage; Postgres mode writes to Postgres via Prisma API.
 export default function Scanner({ openScan }: { openScan: (id: string) => void }) {
   const db = useEco();
+  const { pg, base } = usePg();
   const fileRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("");
   const [image, setImage] = useState<string | null>(null);
@@ -23,9 +27,11 @@ export default function Scanner({ openScan }: { openScan: (id: string) => void }
   const [err, setErr] = useState<string | null>(null);
   const [dupWarn, setDupWarn] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [pgScan, setPgScan] = useState<Scan | null>(null);
   const [overrideCat, setOverrideCat] = useState<DeviceCategory | "">("");
 
-  const active: Scan | null = db.scans.find((s) => s.id === activeId) ?? null;
+  const localActive: Scan | null = db.scans.find((s) => s.id === activeId) ?? null;
+  const active: Scan | null = pg ? pgScan : localActive;
   const demo = db.settings.mode === "demo";
 
   const onFile = (f: File | undefined) => {
@@ -39,7 +45,6 @@ export default function Scanner({ openScan }: { openScan: (id: string) => void }
   };
 
   const simulateCapture = () => {
-    // No camera hardware in demo: generate an honest labeled placeholder.
     const c = document.createElement("canvas");
     c.width = 480; c.height = 320;
     const g = c.getContext("2d")!;
@@ -51,9 +56,41 @@ export default function Scanner({ openScan }: { openScan: (id: string) => void }
     setImageName("simulated_capture.png");
   };
 
+  const parsedWeight = (): number | null => {
+    if (weight.trim() === "") return null;
+    const w = Number(weight);
+    return w;
+  };
+
+  const startPg = async () => {
+    const w = parsedWeight();
+    if (weight.trim() !== "" && !(w != null && w >= 0 && w <= 20000)) { setErr("Weight must be 0–20000 g."); return; }
+    if (!image) { setErr("Capture or upload an image first."); return; }
+    setBusy(true); setPct(15);
+    try {
+      let s = await pgCreateScan(base, {
+        name: name.trim() || "Untitled item",
+        imageName, weightG: w, weightSimulated: demo,
+        brand: brand || undefined, model: model || undefined,
+        visibleDamage: damage, operatingCondition: cond,
+        batteryPresent: batt, batterySwollen: swollen,
+      });
+      setPct(55);
+      const cls = await classifyImage(image, { fileName: imageName ?? undefined });
+      setPct(75);
+      s = await pgClassify(base, s.id, cls.category, cls.confidence, cls.simulated);
+      s = await pgRecommend(base, s.id);
+      setPct(100);
+      setPgScan(s);
+      setErr(null);
+    } catch (e) { setErr((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
   const start = async () => {
+    if (pg) { await startPg(); return; }
     setErr(null); setDupWarn(null);
-    const w = weight.trim() === "" ? null : Number(weight);
+    const w = parsedWeight();
     if (weight.trim() !== "" && !(w != null && w >= 0 && w <= 20000)) { setErr("Weight must be 0–20000 g."); return; }
     if (!image) { setErr("Capture or upload an image first (or proceed explicitly without one from history)."); return; }
     setBusy(true); setPct(10);
@@ -74,33 +111,46 @@ export default function Scanner({ openScan }: { openScan: (id: string) => void }
       applyClassification(scan.id, cls.category, cls.confidence, cls.provider, cls.simulated);
       runRecommendation(scan.id);
       setPct(100);
-      if (demo) {
-        // Demo telemetry heartbeat so Hardware page shows activity.
-        setDeviceOnline(false);
-      }
+      if (demo) setDeviceOnline(false);
     } catch (e) { setErr((e as Error).message); }
     finally { setBusy(false); }
   };
 
-  const doConfirm = (cat: DeviceCategory | null) => {
+  const doConfirm = async (cat: DeviceCategory | null) => {
     if (!active) return;
-    try {
-      confirmScan(active.id, cat);
-      setErr(null);
-    } catch (e) { setErr((e as Error).message); }
+    if (pg) {
+      try {
+        const s = await pgConfirm(base, active.id, cat);
+        setPgScan(s); setErr(null);
+      } catch (e) { setErr((e as Error).message); }
+      return;
+    }
+    try { confirmScan(active.id, cat); setErr(null); }
+    catch (e) { setErr((e as Error).message); }
+  };
+
+  const reset = () => {
+    setActiveId(null); setPgScan(null); setImage(null); setWeight(""); setName("");
+    setDupWarn(null); setOverrideCat("");
   };
 
   return (
     <div className="space-y-4">
       <div>
-        <p className="text-[11px] font-bold tracking-[0.14em] text-emerald-800">OPERATE</p>
+        <p className="text-[11px] font-bold tracking-[0.14em] text-emerald-800">OPERATE{pg ? " · POSTGRES" : ""}</p>
         <h1 className="font-display text-2xl font-extrabold">Live Scanner</h1>
         <p className="text-[13px] text-stone-500">
-          {demo ? "Demo mode: capture is simulated; classification is a labeled mock — never presented as a trained model." : "Hardware mode: connect the ESP32 on the Hardware page; sorting is blocked while offline."}
+          {pg
+            ? "Postgres mode: scans are written to Postgres via the Prisma API. Images stay in this browser (only the filename is stored)."
+            : demo ? "Demo mode: capture is simulated; classification is a labeled mock — never presented as a trained model."
+            : "Hardware mode: connect the ESP32 on the Hardware page; sorting is blocked while offline."}
         </p>
       </div>
 
-      {err && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-[13px] text-red-800">{err} <button className="ml-2 font-bold underline" onClick={() => setErr(null)}>Dismiss</button></div>}
+      {pg && <PgBanner what="Scan lifecycle runs against Postgres." />}
+      {err && (pg
+        ? <PgError message={err} retry={() => setErr(null)} />
+        : <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-[13px] text-red-800">{err} <button className="ml-2 font-bold underline" onClick={() => setErr(null)}>Dismiss</button></div>)}
       {dupWarn && <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-[13px] text-amber-900">{dupWarn}</div>}
 
       <div className="grid gap-3 lg:grid-cols-2">
@@ -141,9 +191,9 @@ export default function Scanner({ openScan }: { openScan: (id: string) => void }
             </div>
           </div>
           <div className="mt-4 flex items-center gap-3">
-            <Btn onClick={start} disabled={busy}>{busy ? "Scanning…" : "Capture & Analyze"}</Btn>
+            <Btn onClick={start} disabled={busy}>{busy ? "Scanning…" : pg ? "Capture & Analyze (Postgres)" : "Capture & Analyze"}</Btn>
             {busy && <div className="flex-1"><Progress pct={pct} /></div>}
-            {!busy && active && <Btn kind="ghost" onClick={() => { setActiveId(null); setImage(null); setWeight(""); setName(""); }}>Reset</Btn>}
+            {!busy && active && <Btn kind="ghost" onClick={reset}>Reset</Btn>}
           </div>
         </Card>
       </div>
@@ -157,6 +207,7 @@ export default function Scanner({ openScan }: { openScan: (id: string) => void }
             <Badge color="stone">{active.weightG != null ? `${active.weightG} g ${active.weightSimulated ? "(sim)" : "(measured)"}` : "no weight"}</Badge>
             {active.recommendation && <Badge color={recColor(active.recommendation.kind)}>{active.recommendation.kind} → {DEST_LABEL[active.recommendation.destination]}</Badge>}
             <Badge color="stone">{active.status}</Badge>
+            {pg && <Badge color="blue">POSTGRES</Badge>}
           </div>
           {active.recommendation && (
             <div className="mt-3 rounded-lg bg-stone-50 p-3 text-[13px]">

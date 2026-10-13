@@ -1,11 +1,167 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useEco, confirmScan, updateScan, submitSortJob, deleteScan } from "@/ecoscan/services/ecoStore";
-import { CATEGORIES, DEST_LABEL, SORT_FLOW, categoryLabel, type DeviceCategory } from "@/ecoscan/types";
+import { pgGetScan, pgConfirm, pgSort, pgGetJob } from "@/ecoscan/services/ecoRemote";
+import { usePg, PgBanner, PgError } from "@/ecoscan/components/PgMode";
+import { CATEGORIES, DEST_LABEL, SORT_FLOW, categoryLabel, type DeviceCategory, type Scan, type SortingJob } from "@/ecoscan/types";
 import { getProfile } from "@/ecoscan/data/materialProfiles";
 import { estimateComponents, fmtG } from "@/ecoscan/lib/ecoUtils";
 import { Card, CardTitle, Btn, Badge, Field, inputCls, selectCls, recColor } from "@/ecoscan/components/ui";
 
-export default function ScanDetail({ id, back }: { id: string; back: () => void }) {
+function CompTable({ s }: { s: Scan }) {
+  const profile = getProfile(s.confirmedCategory ?? s.category);
+  const comps = estimateComponents(s.confirmedCategory ?? s.category, s.weightG, profile);
+  return (
+    <Card>
+      <CardTitle sub={`${profile.version} · typical ${profile.typicalWeightG[0]}–${profile.typicalWeightG[1]} g · ${profile.limitations}`}>Typical composition (estimates, category-level)</CardTitle>
+      {comps.length === 0 ? <p className="text-[13px] text-stone-500">Unknown category — no profile until confirmed.</p> : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12.5px]">
+            <thead><tr className="border-b text-left text-stone-500">
+              {["Component", "Material", "Est. mass", "Confidence", "Destination"].map((h) => <th key={h} className="py-1.5 pr-3 font-semibold">{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {comps.map((c) => (
+                <tr key={c.component} className="border-b border-stone-100">
+                  <td className="py-1.5 pr-3 font-medium">{c.component}</td>
+                  <td className="py-1.5 pr-3 text-stone-600">{c.material}</td>
+                  <td className="py-1.5 pr-3">{c.estimatedMassG != null ? `${c.estimatedMassG} g (${((c.massFraction ?? 0) * 100).toFixed(1)}%)` : <span className="text-stone-400">qualitative — not weighed</span>}</td>
+                  <td className="py-1.5 pr-3"><Badge color={c.confidence === "high" ? "green" : c.confidence === "qualitative" ? "amber" : "stone"}>{c.confidence}</Badge></td>
+                  <td className="py-1.5 pr-3 text-stone-600">{c.destination}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="mt-2 text-[12px] text-stone-500">Sources: {[...new Set(profile.components.map((c) => c.source))].join("; ") || "—"}. Data sources for this scan: {s.dataSources.join(", ")}.</p>
+    </Card>
+  );
+}
+
+function RecCard({ s }: { s: Scan }) {
+  return (
+    <Card>
+      <CardTitle sub="Transparent rule output — evidence, uncertainty, version">Recommendation</CardTitle>
+      {s.recommendation ? (
+        <>
+          <p className="text-[14px] font-semibold">{s.recommendation.explanation}</p>
+          <p className="mt-1 text-[13px]">Destination: <b>{DEST_LABEL[s.recommendation.destination]}</b></p>
+          <ul className="mt-2 list-disc pl-5 text-[13px] text-stone-600">{s.recommendation.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul>
+          {s.recommendation.uncertainty.map((u, i) => <p key={i} className="mt-1 text-[12px] text-amber-800">⚠ {u}</p>)}
+          <p className="mt-2 font-mono text-[11px] text-stone-400">rule {s.recommendation.ruleVersion}</p>
+        </>
+      ) : <p className="text-[13px] text-stone-500">No recommendation yet.</p>}
+      <div className="mt-3">
+        <p className="mb-1 text-[12px] font-semibold text-stone-600">Lifecycle</p>
+        <p className="font-mono text-[11.5px] text-stone-500">{Object.keys(SORT_FLOW).join(" → ")}</p>
+      </div>
+    </Card>
+  );
+}
+
+// ---------- Postgres-backed detail ----------
+function PgDetail({ id, base, back }: { id: string; base: string; back: () => void }) {
+  const db = useEco();
+  const [s, setS] = useState<Scan | null>(null);
+  const [job, setJob] = useState<SortingJob | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+  const [cat, setCat] = useState("");
+  const [dest, setDest] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const load = () => {
+    setLoading(true);
+    pgGetScan(base, id)
+      .then(({ scan, job }) => { setS(scan); setJob(job); setErr(null); setLoading(false); })
+      .catch((e) => { setErr((e as Error).message); setLoading(false); });
+  };
+  useEffect(load, [base, id]);
+
+  if (loading) return <div className="space-y-4"><PgBanner what="Loading scan from Postgres." /><Card><p className="text-[13px] text-stone-500">Loading…</p></Card></div>;
+  if (err || !s) return <div className="space-y-4"><button className="text-[13px] font-semibold text-emerald-900 underline" onClick={back}>← All scans</button><PgError message={err ?? "Not found."} retry={load} /></div>;
+
+  const scan = s;
+  const doConfirm = async () => {
+    try {
+      const upd = await pgConfirm(base, scan.id, (cat as DeviceCategory) || null);
+      setS(upd); setCat(""); setOk("Scan confirmed in Postgres — ready to sort."); setErr(null);
+    } catch (e) { setErr((e as Error).message); setOk(null); }
+  };
+  const doSort = async () => {
+    try {
+      const j = await pgSort(base, scan.id, dest || undefined);
+      setJob(j); setOk(`Job ${j.id.slice(-6)} submitted (hardware). Polling for ESP32 acknowledgement…`); setErr(null);
+      for (let i = 0; i < 6; i++) {
+        await new Promise((r) => setTimeout(r, 2500));
+        try {
+          const cur = await pgGetJob(base, j.id);
+          setJob(cur);
+          if (cur.status === "COMPLETED" || cur.status === "FAILED") break;
+        } catch { break; }
+      }
+      const { scan: fresh, job: freshJob } = await pgGetScan(base, scan.id);
+      setS(fresh); setJob(freshJob);
+    } catch (e) { setErr((e as Error).message); setOk(null); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <button className="text-[13px] font-semibold text-emerald-900 underline" onClick={back}>← All scans</button>
+      <PgBanner what={`Scan ${scan.code} reads/writes Postgres rows.`} />
+      {err && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-[13px] text-red-800">{err}</div>}
+      {ok && <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-[13px] text-emerald-900">{ok}</div>}
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="font-display text-xl font-extrabold">{scan.code} · {scan.name}</h1>
+        <Badge color="stone">{scan.status}</Badge>
+        {scan.recommendation && <Badge color={recColor(scan.recommendation.kind)}>{scan.recommendation.kind}</Badge>}
+        <Badge color="blue">POSTGRES</Badge>
+        <span className="ml-auto text-[12px] text-stone-400">{new Date(scan.createdAt).toLocaleString()}</span>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Card>
+          <CardTitle sub="Identification (image stays in the originating browser)">Record</CardTitle>
+          <div className="grid grid-cols-2 gap-2 text-[13px]">
+            <div><span className="text-stone-500">Predicted:</span> <b>{categoryLabel(scan.predictedCategory)}</b> ({(scan.confidence * 100).toFixed(1)}%)</div>
+            <div><span className="text-stone-500">Confirmed:</span> <b>{scan.confirmed ? categoryLabel(scan.confirmedCategory ?? scan.category) : "not yet"}</b></div>
+            <div><span className="text-stone-500">Weight:</span> <b>{fmtG(scan.weightG)}</b> {scan.weightSimulated ? "(simulated)" : "(measured)"}</div>
+            <div><span className="text-stone-500">Model:</span> <span className="font-mono text-[12px]">{scan.modelVersion} (simulated)</span></div>
+            <div><span className="text-stone-500">Condition:</span> {scan.operatingCondition} · damage: {scan.visibleDamage || "none noted"}</div>
+          </div>
+          {(scan.status === "AWAITING_CONFIRMATION" || scan.status === "NEEDS_MANUAL_REVIEW") && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <select className={selectCls} style={{ width: 230 }} value={cat} onChange={(e) => setCat(e.target.value)}>
+                <option value="">Confirm as predicted…</option>
+                {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+              <Btn onClick={doConfirm}>Confirm</Btn>
+            </div>
+          )}
+        </Card>
+        <RecCard s={scan} />
+      </div>
+      <CompTable s={scan} />
+      <Card>
+        <CardTitle sub="Ack-gated: success only on ESP32 acknowledgement">Sorting</CardTitle>
+        <div className="flex flex-wrap items-center gap-2">
+          <select className={selectCls} style={{ width: 240 }} value={dest || scan.sortDestination || ""} onChange={(e) => setDest(e.target.value)}>
+            <option value="">Destination…</option>
+            {Object.entries(DEST_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+          <Btn onClick={doSort}>Authorize sorting</Btn>
+          {job && <span className="text-[12.5px] text-stone-500">Job {job.id.slice(-6)} · {job.status} · {job.mode} · {job.servoAngle}° · attempts {job.attempts}{job.lastError ? ` · ${job.lastError}` : ""}</span>}
+        </div>
+        <div className="mt-3 flex gap-2">
+          <Btn kind="ghost" onClick={() => window.print()}>Print report</Btn>
+        </div>
+        <p className="mt-2 text-[12px] text-stone-400">Confidence threshold: {Math.round(db.settings.confidenceThreshold * 100)}% (browser setting).</p>
+      </Card>
+    </div>
+  );
+}
+
+// ---------- Browser-local detail (unchanged behavior) ----------
+function LocalDetail({ id, back }: { id: string; back: () => void }) {
   const db = useEco();
   const s = db.scans.find((x) => x.id === id);
   const [err, setErr] = useState<string | null>(null);
@@ -15,10 +171,7 @@ export default function ScanDetail({ id, back }: { id: string; back: () => void 
   const [dest, setDest] = useState("");
   if (!s) return <div className="p-4"><button className="underline" onClick={back}>← Back</button><p className="mt-2">Scan not found (it may have been deleted).</p></div>;
 
-  const profile = getProfile(s.confirmedCategory ?? s.category);
-  const comps = estimateComponents(s.confirmedCategory ?? s.category, s.weightG, profile);
   const job = db.jobs.find((j) => j.id === s.sortJobId);
-
   const act = (fn: () => void, msg?: string) => {
     try { fn(); setErr(null); if (msg) setOk(msg); } catch (e) { setErr((e as Error).message); setOk(null); }
   };
@@ -49,23 +202,6 @@ export default function ScanDetail({ id, back }: { id: string; back: () => void 
             <div><span className="text-stone-500">Condition:</span> {s.operatingCondition} · damage: {s.visibleDamage || "none noted"}</div>
           </div>
           <p className="mt-2 text-[12px] text-amber-800">Photo shows the exterior only — internal components are database estimates, not detections.</p>
-        </Card>
-
-        <Card>
-          <CardTitle sub="Transparent rule output — evidence, uncertainty, version">Recommendation</CardTitle>
-          {s.recommendation ? (
-            <>
-              <p className="text-[14px] font-semibold">{s.recommendation.explanation}</p>
-              <p className="mt-1 text-[13px]">Destination: <b>{DEST_LABEL[s.recommendation.destination]}</b></p>
-              <ul className="mt-2 list-disc pl-5 text-[13px] text-stone-600">{s.recommendation.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul>
-              {s.recommendation.uncertainty.map((u, i) => <p key={i} className="mt-1 text-[12px] text-amber-800">⚠ {u}</p>)}
-              <p className="mt-2 font-mono text-[11px] text-stone-400">rule {s.recommendation.ruleVersion}</p>
-            </>
-          ) : <p className="text-[13px] text-stone-500">No recommendation yet.</p>}
-          <div className="mt-3">
-            <p className="mb-1 text-[12px] font-semibold text-stone-600">Lifecycle</p>
-            <p className="font-mono text-[11.5px] text-stone-500">{Object.keys(SORT_FLOW).join(" → ")}</p>
-          </div>
           {(s.status === "AWAITING_CONFIRMATION" || s.status === "NEEDS_MANUAL_REVIEW") && (
             <div className="mt-3 flex flex-wrap gap-2">
               <select className={selectCls} style={{ width: 230 }} value={cat} onChange={(e) => setCat(e.target.value)}>
@@ -76,32 +212,10 @@ export default function ScanDetail({ id, back }: { id: string; back: () => void 
             </div>
           )}
         </Card>
+        <RecCard s={s} />
       </div>
 
-      <Card>
-        <CardTitle sub={`${profile.version} · typical ${profile.typicalWeightG[0]}–${profile.typicalWeightG[1]} g · ${profile.limitations}`}>Typical composition (estimates, category-level)</CardTitle>
-        {comps.length === 0 ? <p className="text-[13px] text-stone-500">Unknown category — no profile until confirmed.</p> : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-[12.5px]">
-              <thead><tr className="border-b text-left text-stone-500">
-                {["Component", "Material", "Est. mass", "Confidence", "Destination"].map((h) => <th key={h} className="py-1.5 pr-3 font-semibold">{h}</th>)}
-              </tr></thead>
-              <tbody>
-                {comps.map((c) => (
-                  <tr key={c.component} className="border-b border-stone-100">
-                    <td className="py-1.5 pr-3 font-medium">{c.component}</td>
-                    <td className="py-1.5 pr-3 text-stone-600">{c.material}</td>
-                    <td className="py-1.5 pr-3">{c.estimatedMassG != null ? `${c.estimatedMassG} g (${((c.massFraction ?? 0) * 100).toFixed(1)}%)` : <span className="text-stone-400">qualitative — not weighed</span>}</td>
-                    <td className="py-1.5 pr-3"><Badge color={c.confidence === "high" ? "green" : c.confidence === "qualitative" ? "amber" : "stone"}>{c.confidence}</Badge></td>
-                    <td className="py-1.5 pr-3 text-stone-600">{c.destination}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        <p className="mt-2 text-[12px] text-stone-500">Sources: {[...new Set(profile.components.map((c) => c.source))].join("; ") || "—"}. Data sources for this scan: {s.dataSources.join(", ")}.</p>
-      </Card>
+      <CompTable s={s} />
 
       <Card>
         <CardTitle sub="Verified movement only — deposit is NOT sensed">Sorting</CardTitle>
@@ -126,4 +240,10 @@ export default function ScanDetail({ id, back }: { id: string; back: () => void 
       </Card>
     </div>
   );
+}
+
+export default function ScanDetail({ id, back }: { id: string; back: () => void }) {
+  const { pg, base } = usePg();
+  if (pg) return <PgDetail id={id} base={base} back={back} />;
+  return <LocalDetail id={id} back={back} />;
 }

@@ -48,6 +48,14 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000  # docs at /docs
   `firmware/config.example.h` → `config.h`, set Wi-Fi/API/token, flash, monitor serial.
 - ESP32 heartbeat → poll → bounded servo → ack. Sorting stays blocked while offline.
 
+## Database: Browser DB or Prisma Postgres
+
+- **Browser DB (default):** offline `localStorage`, single device, zero setup.
+- **Prisma Postgres (shared):** `prisma/ecoscan.prisma` → Vercel `/api/ecoscan/*`
+  (scans, jobs, alerts, devices, dashboard aggregates) → Postgres. Full setup in
+  `docs/DATABASE.md`. Switch live in **Settings → Database backend**; without
+  `DATABASE_URL` the API answers 503 and the UI says so.
+
 ## What was built (and what is honestly simulated)
 
 | Capability | Status |

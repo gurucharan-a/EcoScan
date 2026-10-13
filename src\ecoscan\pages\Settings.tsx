@@ -3,6 +3,7 @@ import { useEco, updateSettings, resetDemo, seedDemo } from "@/ecoscan/services/
 import { download } from "@/ecoscan/lib/ecoUtils";
 import { DEST_LABEL, type RecommendationKind } from "@/ecoscan/types";
 import { Card, CardTitle, Btn, Field, inputCls, selectCls } from "@/ecoscan/components/ui";
+import DbSettings from "@/ecoscan/components/DbSettings";
 
 export default function Settings() {
   const db = useEco();
@@ -25,6 +26,7 @@ export default function Settings() {
       {ok && <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-[13px] text-emerald-900">{ok}</div>}
 
       <div className="grid gap-3 lg:grid-cols-2">
+        <DbSettings />
         <Card>
           <CardTitle sub="Below threshold → Unknown / manual review">Confidence & sorting</CardTitle>
           <div className="grid grid-cols-2 gap-3">

@@ -18,6 +18,9 @@ model Device {
   firmware  String
   online    Boolean  @default(false)
   lastSeen  DateTime?
+  rssiDbm   Int?
+  mode      String   @default("hardware")
+  health    Json?
   createdAt DateTime @default(now())
   scans     Scan[]
 }
@@ -45,6 +48,7 @@ model Scan {
   status           String   @default("SCANNING")
   sortDestination  String?
   confirmed        Boolean  @default(false)
+  confirmedCategory String?
   deviceId         String?
   device           Device?  @relation(fields: [deviceId], references: [id])
   createdAt        DateTime @default(now())
@@ -67,6 +71,7 @@ model SortingJob {
   lastError   String?
   ackAt       DateTime?
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([scanId])
 }
