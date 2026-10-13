@@ -2,9 +2,9 @@
  * GET  /api/ecoscan/scans?q=&category=&status=&limit=&offset= — filtered history
  * POST /api/ecoscan/scans — create a scan (status SCANNING)
  */
-import { ApiError, audit, bodyOf, needDb, prisma, route, str, type VReq } from "./_db";
+import { ApiError, audit, bodyOf, needDb, prisma, route, str, type VReq } from "./_db.js";
 import type { Prisma } from "@prisma/client";
-import { MODEL_VERSION } from "./_rules";
+import { MODEL_VERSION } from "./_rules.js";
 
 async function list(req: VReq) {
   needDb();
