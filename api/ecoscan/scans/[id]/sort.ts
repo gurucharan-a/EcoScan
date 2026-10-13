@@ -1,6 +1,6 @@
 /** POST /api/ecoscan/scans/[id]/sort {destination?} — authorize a sorting job (interlocks enforced). */
-import { ApiError, audit, bodyOf, needDb, prisma, route, str } from "../../_db";
-import { assertTransition, SERVO_ANGLE } from "../../_rules";
+import { ApiError, audit, bodyOf, needDb, prisma, route, str } from "../../_db.js";
+import { assertTransition, SERVO_ANGLE } from "../../_rules.js";
 
 export default route(async (req) => {
   if (req.method !== "POST") throw new ApiError("METHOD", "Use POST.", 405);
