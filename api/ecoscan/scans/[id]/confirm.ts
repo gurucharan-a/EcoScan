@@ -1,6 +1,6 @@
 /** POST /api/ecoscan/scans/[id]/confirm {category?} — confirm (or correct) then recommend. */
-import { ApiError, audit, bodyOf, needDb, prisma, route, str } from "../../_db";
-import { assertTransition, encodeRec, ruleKind } from "../../_rules";
+import { ApiError, audit, bodyOf, needDb, prisma, route, str } from "../../_db.js";
+import { assertTransition, encodeRec, ruleKind } from "../../_rules.js";
 
 export default route(async (req) => {
   if (req.method !== "POST") throw new ApiError("METHOD", "Use POST.", 405);
