@@ -1,6 +1,7 @@
+import process from "node:process";
 /** GET /api/ecoscan/health — liveness + versions (works without a database). */
-import { MODEL_VERSION, PROFILE_VERSION, RULE_VERSION } from "./_rules";
-import { route } from "./_db";
+import { MODEL_VERSION, PROFILE_VERSION, RULE_VERSION } from "./_rules.js";
+import { route } from "./_db.js";
 
 export default route(async () => ({
   ok: true,
