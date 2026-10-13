@@ -1,5 +1,5 @@
 /** GET /api/ecoscan/jobs/[id] — one sorting job. */
-import { ApiError, needDb, prisma, route, str } from "../_db";
+import { ApiError, needDb, prisma, route, str } from "../_db.js";
 
 export default route(async (req) => {
   needDb();
