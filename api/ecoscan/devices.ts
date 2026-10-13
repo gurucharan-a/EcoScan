@@ -1,5 +1,5 @@
 /** GET /api/ecoscan/devices — registered chambers with online derivation. */
-import { ensureDevice, needDb, prisma, route } from "./_db";
+import { ensureDevice, needDb, prisma, route } from "./_db.js";
 
 export default route(async () => {
   needDb();
