@@ -1,5 +1,5 @@
 /** GET /api/ecoscan/alerts — newest first (event-generated only). */
-import { needDb, prisma, route } from "./_db";
+import { needDb, prisma, route } from "./_db.js";
 
 export default route(async () => {
   needDb();
