@@ -1,0 +1,9 @@
+# Excluded from Vercel uploads — not needed to build or serve the EcoScan SPA.
+# (Keep prisma/: `postinstall` runs `prisma generate` during `npm install`.)
+backend/
+firmware/
+docs/
+scripts/
+*.log
+dev-server*.log
+.git/

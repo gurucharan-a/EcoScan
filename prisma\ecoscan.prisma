@@ -1,0 +1,119 @@
+// EcoScan production schema — PostgreSQL/Supabase.
+// Browser demo mirrors these models in src/ecoscan/types.ts + services/ecoStore.ts.
+// SQLite dev path: backend/app/main.py creates an equivalent schema automatically.
+// Deploy: set DATABASE_URL, run `npx prisma db push --schema=prisma/ecoscan.prisma`.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Device {
+  id        String   @id @default(cuid())
+  name      String
+  board     String
+  firmware  String
+  online    Boolean  @default(false)
+  lastSeen  DateTime?
+  createdAt DateTime @default(now())
+  scans     Scan[]
+}
+
+model Scan {
+  id               String   @id @default(cuid())
+  code             String   @unique
+  name             String
+  category         String
+  predictedCategory String
+  confidence       Float
+  modelVersion     String
+  inferenceSimulated Boolean @default(true)
+  weightG          Float?
+  weightSimulated  Boolean  @default(true)
+  imageUrl         String?
+  brand            String?
+  model            String?
+  visibleDamage    String   @default("")
+  operatingCondition String @default("untested")
+  batteryPresent   Boolean  @default(false)
+  batterySwollen   Boolean  @default(false)
+  recommendation   String?
+  ruleVersion      String?
+  status           String   @default("SCANNING")
+  sortDestination  String?
+  confirmed        Boolean  @default(false)
+  deviceId         String?
+  device           Device?  @relation(fields: [deviceId], references: [id])
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  jobs             SortingJob[]
+
+  @@index([status])
+  @@index([category])
+}
+
+model SortingJob {
+  id          String   @id @default(cuid())
+  scanId      String
+  scan        Scan     @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  destination String
+  status      String   @default("QUEUED")
+  mode        String
+  servoAngle  Float?
+  attempts    Int      @default(0)
+  lastError   String?
+  ackAt       DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([scanId])
+}
+
+model MaterialProfile {
+  id        String   @id @default(cuid())
+  category  String   @unique
+  version   String
+  payload   Json
+  updatedAt DateTime @updatedAt
+}
+
+model CollectionBin {
+  id       String @id @default(cuid())
+  name     String
+  status   String @default("COLLECTING")
+  batchId  String?
+  payload  Json?
+}
+
+model Alert {
+  id       String   @id @default(cuid())
+  severity String
+  title    String
+  body     String
+  scanId   String?
+  acked    Boolean  @default(false)
+  resolved Boolean  @default(false)
+  at       DateTime @default(now())
+
+  @@index([resolved])
+}
+
+model AuditEvent {
+  id       String   @id @default(cuid())
+  actor    String
+  action   String
+  entity   String
+  entityId String
+  payload  Json
+  at       DateTime @default(now())
+
+  @@index([entityId])
+}
+
+model EcoSetting {
+  key       String @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}

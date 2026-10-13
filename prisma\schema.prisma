@@ -1,0 +1,290 @@
+// ServiceGrid production schema — PostgreSQL.
+// Local demo mirrors these models 1:1 in src/types + services/store (localStorage).
+// Deploy: set DATABASE_URL, run `npx prisma migrate dev`, then `npm run db:seed`.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CUSTOMER
+  OPS_MANAGER
+  TECHNICIAN
+  ADMIN
+}
+
+enum Priority {
+  P1
+  P2
+  P3
+  P4
+}
+
+enum RequestStatus {
+  CREATED
+  VALIDATED
+  PENDING_APPROVAL
+  APPROVED
+  ASSIGNED
+  IN_PROGRESS
+  PENDING_VERIFICATION
+  CLOSED
+  EXCEPTION
+  REJECTED
+  CANCELLED
+}
+
+enum ExceptionType {
+  TECH_DROPOUT
+  PART_UNAVAILABLE
+  SLA_BREACH
+  TECH_CONFLICT
+  RESOURCE_CONFLICT
+}
+
+model User {
+  id               String            @id @default(cuid())
+  name             String
+  email            String            @unique
+  passwordHash     String
+  role             Role
+  siteId           String?
+  onboarded        Boolean           @default(false)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  techProfile      Technician?
+  customerProfile  CustomerProfile?
+  requests         ServiceRequest[]  @relation("CreatedBy")
+  notifications    Notification[]
+
+  @@index([role])
+}
+
+model CustomerProfile {
+  id      String  @id @default(cuid())
+  userId  String  @unique
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company String?
+  phone   String?
+  address String?
+  lat     Float?
+  lng     Float?
+  siteId  String?
+}
+
+model Skill {
+  id       String            @id @default(cuid())
+  name     String            @unique
+  category String            @default("General")
+  techs    TechnicianSkill[]
+}
+
+model TechnicianSkill {
+  technicianId String
+  skillId      String
+  technician   Technician @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  skill        Skill      @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([technicianId, skillId])
+}
+
+model Site {
+  id       String           @id @default(cuid())
+  name     String
+  code     String           @unique
+  lat      Float
+  lng      Float
+  address  String
+  machines Machine[]
+  parts    PartInventory[]
+  techs    Technician[]
+  requests ServiceRequest[]
+}
+
+model Machine {
+  id              String           @id @default(cuid())
+  code            String           @unique
+  name            String
+  siteId          String
+  site            Site             @relation(fields: [siteId], references: [id])
+  status          String
+  eligible        Boolean
+  warrantyActive  Boolean
+  contractActive  Boolean
+  skills          String[]
+  requests        ServiceRequest[]
+}
+
+model Technician {
+  id             String            @id @default(cuid())
+  userId         String            @unique
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  siteId         String
+  site           Site              @relation(fields: [siteId], references: [id])
+  skills         String[]
+  certifications String[]
+  lat            Float
+  lng            Float
+  online         Boolean           @default(true)
+  currentLoad    Float             @default(0)
+  availability   Float             @default(1)
+  experienceYears Int              @default(1)
+  region         String            @default("")
+  updatedAt      DateTime          @updatedAt
+  assignments    Assignment[]
+  skillLinks     TechnicianSkill[]
+}
+
+model PartInventory {
+  id          String @id @default(cuid())
+  sku         String
+  name        String
+  qty         Int
+  reservedQty Int    @default(0)
+  siteId      String
+  site        Site   @relation(fields: [siteId], references: [id])
+  unitCost    Float
+
+  @@unique([sku, siteId])
+}
+
+model ServiceRequest {
+  id               String        @id @default(cuid())
+  code             String        @unique
+  machineId        String
+  machine          Machine       @relation(fields: [machineId], references: [id])
+  siteId           String
+  site             Site          @relation(fields: [siteId], references: [id])
+  title            String
+  description      String
+  priority         Priority
+  requiredSkills   String[]
+  requiredParts    Json
+  status           RequestStatus @default(CREATED)
+  slaDeadline      DateTime
+  slaWarned        Boolean       @default(false)
+  rev              Int           @default(0)
+  createdBy        String
+  creator          User          @relation("CreatedBy", fields: [createdBy], references: [id])
+  createdAt        DateTime      @default(now())
+  validationReport Json?
+  reservations     Reservation[]
+  assignments      Assignment[]
+  logs             TaskLog[]
+  attachments      Attachment[]
+  exceptions       ExceptionFlag[]
+
+  @@index([status])
+  @@index([siteId])
+}
+
+model Reservation {
+  id        String         @id @default(cuid())
+  requestId String
+  request   ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  sku       String
+  siteId    String
+  qty       Int
+  consumed  Boolean        @default(false)
+  createdAt DateTime       @default(now())
+}
+
+model Assignment {
+  id           String         @id @default(cuid())
+  requestId    String
+  request      ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  technicianId String
+  tech         Technician     @relation(fields: [technicianId], references: [id])
+  score        Float
+  breakdown    Json
+  explanation  String
+  active       Boolean        @default(true)
+  acceptedAt   DateTime?
+  createdAt    DateTime       @default(now())
+
+  @@index([requestId])
+  @@index([technicianId])
+}
+
+model TaskLog {
+  id        String         @id @default(cuid())
+  requestId String
+  request   ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  authorId  String
+  authorName String
+  text      String
+  kind      String
+  at        DateTime       @default(now())
+}
+
+model Attachment {
+  id        String         @id @default(cuid())
+  requestId String
+  request   ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  name      String
+  url       String
+  note      String?
+  at        DateTime       @default(now())
+}
+
+model ExceptionFlag {
+  id          String         @id @default(cuid())
+  requestId   String
+  request     ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  type        ExceptionType
+  message     String
+  resolved    Boolean        @default(false)
+  resolvedBy  String?
+  createdAt   DateTime       @default(now())
+  suggestion  String?
+  candidateId String?
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  toUserId  String?
+  user      User?    @relation(fields: [toUserId], references: [id], onDelete: Cascade)
+  toRole    String?
+  title     String
+  body      String
+  at        DateTime @default(now())
+  read      Boolean  @default(false)
+
+  @@index([toUserId])
+}
+
+model AuditLog {
+  id       String   @id @default(cuid())
+  actor    String
+  action   String
+  entity   String
+  entityId String
+  payload  Json
+  prevHash String
+  hash     String
+  at       DateTime @default(now())
+
+  @@index([entityId])
+}
+
+/** Append-only realtime feed. Clients poll GET /api/events?since=<seq>. */
+model Event {
+  seq       Int      @id @default(autoincrement())
+  type      String
+  payload   Json
+  createdAt DateTime @default(now())
+
+  @@index([seq])
+}
+
+/** Server-driven configuration (SLA targets, matching weights). */
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
