@@ -1,5 +1,5 @@
 /** POST /api/ecoscan/devices/[id]/heartbeat — ESP32 telemetry (token-gated). */
-import { ApiError, audit, bodyOf, ensureDevice, needDb, needToken, prisma, raiseAlert, route, str } from "../../_db";
+import { ApiError, audit, bodyOf, ensureDevice, needDb, needToken, prisma, raiseAlert, route, str } from "../../_db.js";
 
 export default route(async (req) => {
   if (req.method !== "POST") throw new ApiError("METHOD", "Use POST.", 405);
